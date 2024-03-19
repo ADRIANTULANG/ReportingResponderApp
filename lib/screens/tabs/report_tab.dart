@@ -93,18 +93,24 @@ class _ReportTabState extends State<ReportTab> {
                         width: 100.w,
                         child: GestureDetector(
                           onTap: () {
-                            if (reportList[index].responder == "" ||
-                                reportList[index].responder ==
-                                    FirebaseAuth.instance.currentUser!.uid) {
-                              Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (context) => ReportDetails(
-                                        reportDetails: reportList[index],
-                                      )));
+                            if (reportList[index].responder != "Rejected") {
+                              if (reportList[index].responder == "" ||
+                                  reportList[index].responder ==
+                                      FirebaseAuth.instance.currentUser!.uid) {
+                                Navigator.of(context).push(MaterialPageRoute(
+                                    builder: (context) => ReportDetails(
+                                          reportDetails: reportList[index],
+                                        )));
+                              } else {
+                                MessageDialog.showMessageDialog(
+                                    context: context,
+                                    message:
+                                        "Your report has been retrieved and is being acted upon by another responder");
+                              }
                             } else {
                               MessageDialog.showMessageDialog(
                                   context: context,
-                                  message:
-                                      "Your report has been retrieved and is being acted upon by another responder");
+                                  message: "This report has been rejected");
                             }
                           },
                           child: Card(

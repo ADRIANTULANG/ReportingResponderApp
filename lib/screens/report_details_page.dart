@@ -4,6 +4,7 @@ import 'dart:developer';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:responder/model/report_model.dart';
@@ -25,6 +26,7 @@ class _ReportDetailsState extends State<ReportDetails> {
   ResponderDetails? reporterDetails;
 
   Set<Marker> markers = {};
+  Set<Polyline> poly = {};
   final Completer<GoogleMapController> _controller =
       Completer<GoogleMapController>();
   CameraPosition? kGooglePlex;
@@ -85,7 +87,9 @@ class _ReportDetailsState extends State<ReportDetails> {
         "notification": {
           "body": status == "Accepted"
               ? "We have accepted your report"
-              : "We have already acted on your report and it is done",
+              : status == "Rejected"
+                  ? "Your report has been rejected"
+                  : "We have already acted on your report and it is done",
           "title": "Report Notification",
           "subtitle": "",
         }
@@ -110,6 +114,7 @@ class _ReportDetailsState extends State<ReportDetails> {
   initializedData() async {
     Future.delayed(const Duration(milliseconds: 500), () async {
       await getResponderDetails();
+      var loc = await Geolocator.getCurrentPosition();
       setState(() {
         markers.add(Marker(
           markerId: MarkerId(widget.reportDetails.name),
@@ -120,6 +125,17 @@ class _ReportDetailsState extends State<ReportDetails> {
             snippet: 'Status: ${widget.reportDetails.status}',
           ),
         ));
+
+        poly.add(
+          Polyline(
+              color: Colors.transparent,
+              width: 2,
+              points: [
+                LatLng(loc.latitude, loc.longitude),
+                LatLng(widget.reportDetails.lat, widget.reportDetails.long),
+              ],
+              polylineId: PolylineId(widget.reportDetails.name)),
+        );
         kGooglePlex = CameraPosition(
           target: LatLng(widget.reportDetails.lat, widget.reportDetails.long),
           zoom: 14.4746,
@@ -138,12 +154,18 @@ class _ReportDetailsState extends State<ReportDetails> {
           .doc(widget.reportDetails.id)
           .update({
         "status": status,
-        "responder": FirebaseAuth.instance.currentUser!.uid
+        "responder":
+            status == "Rejected" ? "" : FirebaseAuth.instance.currentUser!.uid
       });
       setState(() {
         widget.reportDetails.status = status;
       });
       sendNotifToUser(status: status);
+      if (status == "Rejected") {
+        if (context.mounted) {
+          Navigator.pop(context);
+        }
+      }
     } catch (_) {}
   }
 
@@ -160,7 +182,9 @@ class _ReportDetailsState extends State<ReportDetails> {
                       height: 100.h,
                       width: 100.w,
                       child: GoogleMap(
+                        padding: EdgeInsets.only(bottom: 9.h),
                         markers: markers,
+                        polylines: poly,
                         mapType: MapType.normal,
                         initialCameraPosition: kGooglePlex!,
                         onMapCreated: (GoogleMapController controller) {
@@ -339,7 +363,27 @@ class _ReportDetailsState extends State<ReportDetails> {
                                                     },
                                                     child: const Text("DONE")),
                                               )
-                                            : const SizedBox()
+                                            : const SizedBox(),
+                                    widget.reportDetails.status == "Pending"
+                                        ? Padding(
+                                            padding: EdgeInsets.only(top: 2.h),
+                                            child: SizedBox(
+                                              height: 6.h,
+                                              width: 100.w,
+                                              child: ElevatedButton(
+                                                  style: const ButtonStyle(
+                                                      backgroundColor:
+                                                          MaterialStatePropertyAll(
+                                                              Colors
+                                                                  .redAccent)),
+                                                  onPressed: () {
+                                                    updateReport(
+                                                        status: "Rejected");
+                                                  },
+                                                  child: const Text("REJECT")),
+                                            ),
+                                          )
+                                        : const SizedBox.shrink()
                                   ],
                                 ),
                               ),
