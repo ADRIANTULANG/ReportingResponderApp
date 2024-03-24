@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:responder/screens/report_details_page.dart';
 import 'package:responder/widgets/message_dialog.dart';
-import 'package:responder/widgets/text_widget.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../model/report_model.dart';
@@ -56,7 +55,8 @@ class _ReportTabState extends State<ReportTab> {
           Map mapdata = report.data();
           mapdata['id'] = report.id;
           mapdata['dateTime'] = mapdata['dateTime'].toDate().toString();
-
+          mapdata['remarks'] =
+              mapdata.containsKey('remarks') ? mapdata['remarks'] : "";
           data.add(mapdata);
         }
         Future.delayed(const Duration(seconds: 2), () {
@@ -99,7 +99,8 @@ class _ReportTabState extends State<ReportTab> {
                                       FirebaseAuth.instance.currentUser!.uid) {
                                 Navigator.of(context).push(MaterialPageRoute(
                                     builder: (context) => ReportDetails(
-                                          reportDetails: reportList[index],
+                                          from: "Home",
+                                          reportID: reportList[index].id,
                                         )));
                               } else {
                                 MessageDialog.showMessageDialog(

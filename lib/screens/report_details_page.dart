@@ -10,13 +10,18 @@ import 'package:intl/intl.dart';
 import 'package:responder/model/report_model.dart';
 import 'package:responder/model/responder_detail_model.dart';
 import 'package:responder/screens/chat_page.dart';
+import 'package:responder/screens/home_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:location/location.dart';
 
 class ReportDetails extends StatefulWidget {
-  const ReportDetails({super.key, required this.reportDetails});
-  final Reports reportDetails;
+  const ReportDetails({super.key, required this.reportID, required this.from});
+  final String reportID;
+  final String from;
+
   @override
   State<ReportDetails> createState() => _ReportDetailsState();
 }
@@ -24,6 +29,7 @@ class ReportDetails extends StatefulWidget {
 class _ReportDetailsState extends State<ReportDetails> {
   ResponderDetails? responderDetails;
   ResponderDetails? reporterDetails;
+  Reports? reportDetails;
 
   Set<Marker> markers = {};
   Set<Polyline> poly = {};
@@ -31,14 +37,73 @@ class _ReportDetailsState extends State<ReportDetails> {
       Completer<GoogleMapController>();
   CameraPosition? kGooglePlex;
   bool isShowContainer = true;
+  StreamSubscription<LocationData>? streamLocation;
+  Location location = Location();
+
   TextEditingController remarks = TextEditingController();
+
+  getReportDetails() async {
+    // try {
+    var repDetails = await FirebaseFirestore.instance
+        .collection('Reports')
+        .doc(widget.reportID)
+        .get();
+    if (repDetails.exists) {
+      Map<String, dynamic>? mapreportDetails = repDetails.data();
+      reportDetails = Reports(
+          dateTime:
+              DateTime.parse(mapreportDetails!['dateTime'].toDate().toString()),
+          address: mapreportDetails['address'],
+          contactnumber: mapreportDetails['contactnumber'],
+          year: mapreportDetails['year'],
+          caption: mapreportDetails['caption'],
+          responder: mapreportDetails['responder'],
+          type: mapreportDetails['type'],
+          userId: mapreportDetails['userId'],
+          long: mapreportDetails["long"]?.toDouble(),
+          month: mapreportDetails['month'],
+          imageUrl: mapreportDetails['imageURL'] ?? "",
+          name: mapreportDetails['name'],
+          day: mapreportDetails['day'],
+          lat: mapreportDetails['lat'],
+          remarks: mapreportDetails['remarks'] ?? "",
+          status: mapreportDetails['status'],
+          id: widget.reportID);
+
+      await initializedData();
+      await getReporterDetails();
+      await initStreamLocation();
+    }
+    // } catch (_) {
+    //   log("ERROR: getReportDetails $_");
+    // }
+  }
+
+  initStreamLocation() async {
+    streamLocation =
+        location.onLocationChanged.listen((LocationData locationData) async {
+      log(reportDetails!.status.toString());
+      if (reportDetails!.status == "Accepted") {
+        log(locationData.latitude.toString());
+        log(locationData.longitude.toString());
+        await FirebaseFirestore.instance
+            .collection('Reports')
+            .doc(widget.reportID)
+            .update({
+          "responderLat": locationData.latitude,
+          "responderLong": locationData.longitude
+        });
+      }
+    });
+  }
+
   getResponderDetails() async {
     try {
-      if (widget.reportDetails.responder != "" ||
-          widget.reportDetails.responder.isNotEmpty) {
+      if (reportDetails!.responder != "" ||
+          reportDetails!.responder.isNotEmpty) {
         var responder = await FirebaseFirestore.instance
             .collection('Users')
-            .doc(widget.reportDetails.responder)
+            .doc(reportDetails!.responder)
             .get();
         if (responder.exists) {
           var responderDetail = responder.data();
@@ -58,7 +123,7 @@ class _ReportDetailsState extends State<ReportDetails> {
     try {
       var reporter = await FirebaseFirestore.instance
           .collection('Users')
-          .doc(widget.reportDetails.userId)
+          .doc(reportDetails!.userId)
           .get();
       if (reporter.exists) {
         var repDetail = reporter.data();
@@ -89,7 +154,9 @@ class _ReportDetailsState extends State<ReportDetails> {
               ? "We have accepted your report"
               : status == "Rejected"
                   ? "Your report has been rejected"
-                  : "We have already acted on your report and it is done",
+                  : status == "Cancelled"
+                      ? "Your report has been cancelled"
+                      : "We have already acted on your report and it is done",
           "title": "Report Notification",
           "subtitle": "",
         }
@@ -104,25 +171,18 @@ class _ReportDetailsState extends State<ReportDetails> {
     } catch (_) {}
   }
 
-  @override
-  void initState() {
-    super.initState();
-    initializedData();
-    getReporterDetails();
-  }
-
   initializedData() async {
     Future.delayed(const Duration(milliseconds: 500), () async {
       await getResponderDetails();
       var loc = await Geolocator.getCurrentPosition();
       setState(() {
         markers.add(Marker(
-          markerId: MarkerId(widget.reportDetails.name),
+          markerId: MarkerId(reportDetails!.name),
           icon: BitmapDescriptor.defaultMarker,
-          position: LatLng(widget.reportDetails.lat, widget.reportDetails.long),
+          position: LatLng(reportDetails!.lat, reportDetails!.long),
           infoWindow: InfoWindow(
-            title: widget.reportDetails.caption,
-            snippet: 'Status: ${widget.reportDetails.status}',
+            title: reportDetails!.caption,
+            snippet: 'Status: ${reportDetails!.status}',
           ),
         ));
 
@@ -132,12 +192,12 @@ class _ReportDetailsState extends State<ReportDetails> {
               width: 2,
               points: [
                 LatLng(loc.latitude, loc.longitude),
-                LatLng(widget.reportDetails.lat, widget.reportDetails.long),
+                LatLng(reportDetails!.lat, reportDetails!.long),
               ],
-              polylineId: PolylineId(widget.reportDetails.name)),
+              polylineId: PolylineId(reportDetails!.name)),
         );
         kGooglePlex = CameraPosition(
-          target: LatLng(widget.reportDetails.lat, widget.reportDetails.long),
+          target: LatLng(reportDetails!.lat, reportDetails!.long),
           zoom: 14.4746,
         );
       });
@@ -151,14 +211,20 @@ class _ReportDetailsState extends State<ReportDetails> {
     try {
       await FirebaseFirestore.instance
           .collection('Reports')
-          .doc(widget.reportDetails.id)
+          .doc(reportDetails!.id)
           .update({
         "status": status,
         "responder":
             status == "Rejected" ? "" : FirebaseAuth.instance.currentUser!.uid
       });
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
       setState(() {
-        widget.reportDetails.status = status;
+        reportDetails!.status = status;
+        reportDetails!.responder = FirebaseAuth.instance.currentUser!.uid;
+        if (status == "Accepted") {
+          getResponderDetails();
+          prefs.setString("reportID", widget.reportID);
+        }
       });
       sendNotifToUser(status: status);
       if (status == "Rejected") {
@@ -166,379 +232,472 @@ class _ReportDetailsState extends State<ReportDetails> {
           Navigator.pop(context);
         }
       }
+      if (status == "Done") {
+        streamLocation!.cancel();
+        await prefs.remove('reportID');
+      }
     } catch (_) {}
+  }
+
+  cancelReport() async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('Reports')
+          .doc(reportDetails!.id)
+          .update({
+        "status": "Pending",
+        "responder": "",
+        "responderLat": 0.0,
+        "responderLong": 0.0,
+      });
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.remove('reportID');
+      setState(() {
+        reportDetails!.status = "Pending";
+        reportDetails!.responder = "";
+      });
+      // sendNotifToUser(status: "Cancelled");
+      if (context.mounted) {
+        if (widget.from == "Root") {
+          Navigator.pop(context);
+          Navigator.of(context).push(
+              MaterialPageRoute(builder: (context) => const HomeScreen()));
+        } else {
+          Navigator.pop(context);
+        }
+
+        // Navigator.pushAndRemoveUntil(
+        //     context,
+        //     MaterialPageRoute(
+        //         builder: (BuildContext context) => const HomeScreen()),
+        //     ModalRoute.withName('/'));
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    getReportDetails();
+  }
+
+  @override
+  void dispose() {
+    if (streamLocation != null) {
+      streamLocation!.cancel();
+    }
+    super.dispose();
+  }
+
+  getBack() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? reportid = prefs.getString('reportID');
+    if (reportid != null) {
+    } else {
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        body: kGooglePlex == null
-            ? const SizedBox()
-            : SizedBox(
-                child: Stack(
-                  alignment: AlignmentDirectional.bottomCenter,
-                  children: [
-                    SizedBox(
-                      height: 100.h,
-                      width: 100.w,
-                      child: GoogleMap(
-                        padding: EdgeInsets.only(bottom: 9.h),
-                        markers: markers,
-                        polylines: poly,
-                        mapType: MapType.normal,
-                        initialCameraPosition: kGooglePlex!,
-                        onMapCreated: (GoogleMapController controller) {
-                          _controller.complete(controller);
-                        },
-                      ),
+        body: WillPopScope(
+      onWillPop: () => getBack(),
+      child: kGooglePlex == null
+          ? const SizedBox(
+              child: Center(
+                child: CircularProgressIndicator(),
+              ),
+            )
+          : SizedBox(
+              child: Stack(
+                alignment: AlignmentDirectional.bottomCenter,
+                children: [
+                  SizedBox(
+                    height: 100.h,
+                    width: 100.w,
+                    child: GoogleMap(
+                      padding: EdgeInsets.only(bottom: 9.h),
+                      markers: markers,
+                      polylines: poly,
+                      mapType: MapType.normal,
+                      initialCameraPosition: kGooglePlex!,
+                      onMapCreated: (GoogleMapController controller) {
+                        _controller.complete(controller);
+                      },
                     ),
-                    isShowContainer
-                        ? Container(
-                            width: 100.w,
-                            decoration: BoxDecoration(
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.2),
-                                    spreadRadius: 4,
-                                    blurRadius: 5,
-                                    offset: const Offset(
-                                        0, 0), // changes x,y position of shadow
+                  ),
+                  isShowContainer
+                      ? Container(
+                          width: 100.w,
+                          decoration: BoxDecoration(
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.2),
+                                  spreadRadius: 4,
+                                  blurRadius: 5,
+                                  offset: const Offset(
+                                      0, 0), // changes x,y position of shadow
+                                ),
+                              ],
+                              color: Colors.white,
+                              borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(20),
+                                  topRight: Radius.circular(20))),
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                                left: 5.w, right: 5.w, top: 2.h, bottom: 2.h),
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Text(
+                                            reportDetails!.type,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 15.sp,
+                                            ),
+                                          ),
+                                          Text(
+                                            " (${reportDetails!.status})",
+                                            style: TextStyle(
+                                              color: reportDetails!.status ==
+                                                      "Pending"
+                                                  ? Colors.orange
+                                                  : Colors.green,
+                                              fontWeight: FontWeight.normal,
+                                              fontSize: 13.5.sp,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              isShowContainer = isShowContainer
+                                                  ? false
+                                                  : true;
+                                            });
+                                          },
+                                          child: const Icon(Icons.clear)),
+                                    ],
                                   ),
-                                ],
-                                color: Colors.white,
-                                borderRadius: const BorderRadius.only(
-                                    topLeft: Radius.circular(20),
-                                    topRight: Radius.circular(20))),
-                            child: Padding(
-                              padding: EdgeInsets.only(
-                                  left: 5.w, right: 5.w, top: 2.h, bottom: 2.h),
-                              child: SingleChildScrollView(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Row(
+                                  SizedBox(
+                                    height: 2.h,
+                                  ),
+                                  Text(
+                                    reportDetails!.name,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13.sp,
+                                    ),
+                                  ),
+                                  Text(
+                                    reportDetails!.contactnumber,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.normal,
+                                      fontSize: 12.sp,
+                                    ),
+                                  ),
+                                  Text(
+                                    reportDetails!.address,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.normal,
+                                      fontSize: 12.sp,
+                                    ),
+                                  ),
+                                  Text(
+                                    "${DateFormat.yMMMMd().format(reportDetails!.dateTime)} ${DateFormat.jm().format(reportDetails!.dateTime)}",
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.normal,
+                                        fontSize: 12.sp),
+                                  ),
+                                  SizedBox(
+                                    height: 2.h,
+                                  ),
+                                  Text(
+                                    reportDetails!.caption,
+                                    maxLines: 3,
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.normal,
+                                        fontSize: 12.sp,
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                  SizedBox(
+                                    height: 2.h,
+                                  ),
+                                  Container(
+                                    height: 15.h,
+                                    width: 100.w,
+                                    decoration: BoxDecoration(
+                                        image: reportDetails!.imageUrl == ""
+                                            ? null
+                                            : DecorationImage(
+                                                fit: BoxFit.cover,
+                                                image: NetworkImage(
+                                                    reportDetails!.imageUrl))),
+                                  ),
+                                  SizedBox(
+                                    height: 2.h,
+                                  ),
+                                  reportDetails!.remarks == ""
+                                      ? const SizedBox()
+                                      : Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              widget.reportDetails.type,
+                                              "Remarks",
                                               style: TextStyle(
                                                 fontWeight: FontWeight.bold,
-                                                fontSize: 15.sp,
+                                                fontSize: 13.sp,
                                               ),
                                             ),
+                                            SizedBox(
+                                              height: 2.h,
+                                            ),
                                             Text(
-                                              " (${widget.reportDetails.status})",
+                                              reportDetails!.remarks,
                                               style: TextStyle(
-                                                color: widget.reportDetails
-                                                            .status ==
-                                                        "Pending"
-                                                    ? Colors.orange
-                                                    : Colors.green,
                                                 fontWeight: FontWeight.normal,
-                                                fontSize: 13.5.sp,
+                                                fontSize: 12.sp,
                                               ),
                                             ),
                                           ],
                                         ),
-                                        GestureDetector(
-                                            onTap: () {
-                                              setState(() {
-                                                isShowContainer =
-                                                    isShowContainer
-                                                        ? false
-                                                        : true;
-                                              });
-                                            },
-                                            child: const Icon(Icons.clear)),
-                                      ],
-                                    ),
-                                    SizedBox(
-                                      height: 2.h,
-                                    ),
-                                    Text(
-                                      widget.reportDetails.name,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13.sp,
-                                      ),
-                                    ),
-                                    Text(
-                                      widget.reportDetails.contactnumber,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.normal,
-                                        fontSize: 12.sp,
-                                      ),
-                                    ),
-                                    Text(
-                                      widget.reportDetails.address,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.normal,
-                                        fontSize: 12.sp,
-                                      ),
-                                    ),
-                                    Text(
-                                      "${DateFormat.yMMMMd().format(widget.reportDetails.dateTime)} ${DateFormat.jm().format(widget.reportDetails.dateTime)}",
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.normal,
-                                          fontSize: 12.sp),
-                                    ),
-                                    SizedBox(
-                                      height: 2.h,
-                                    ),
-                                    Text(
-                                      widget.reportDetails.caption,
-                                      maxLines: 3,
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.normal,
-                                          fontSize: 12.sp,
-                                          overflow: TextOverflow.ellipsis),
-                                    ),
-                                    SizedBox(
-                                      height: 2.h,
-                                    ),
-                                    Container(
-                                      height: 15.h,
-                                      width: 100.w,
-                                      decoration: BoxDecoration(
-                                          image: DecorationImage(
-                                              fit: BoxFit.cover,
-                                              image: NetworkImage(widget
-                                                  .reportDetails.imageUrl))),
-                                    ),
-                                    SizedBox(
-                                      height: 2.h,
-                                    ),
-                                    widget.reportDetails.remarks == ""
-                                        ? const SizedBox()
-                                        : Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                "Remarks",
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 13.sp,
+                                  SizedBox(
+                                    height: 2.h,
+                                  ),
+                                  reportDetails!.status == "Pending"
+                                      ? SizedBox(
+                                          height: 6.h,
+                                          width: 100.w,
+                                          child: ElevatedButton(
+                                              onPressed: () {
+                                                updateReport(
+                                                    status: "Accepted");
+                                              },
+                                              child: const Text("ACCEPT")),
+                                        )
+                                      : reportDetails!.status == "Accepted"
+                                          ? Column(
+                                              children: [
+                                                SizedBox(
+                                                  height: 6.h,
+                                                  width: 100.w,
+                                                  child: ElevatedButton(
+                                                      onPressed: () {
+                                                        updateReport(
+                                                            status: "Done");
+                                                      },
+                                                      child:
+                                                          const Text("DONE")),
                                                 ),
-                                              ),
-                                              SizedBox(
-                                                height: 2.h,
-                                              ),
-                                              Text(
-                                                widget.reportDetails.remarks,
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.normal,
-                                                  fontSize: 12.sp,
+                                                SizedBox(
+                                                  height: 2.h,
                                                 ),
-                                              ),
-                                            ],
-                                          ),
-                                    SizedBox(
-                                      height: 2.h,
-                                    ),
-                                    widget.reportDetails.status == "Pending"
-                                        ? SizedBox(
+                                                SizedBox(
+                                                  height: 6.h,
+                                                  width: 100.w,
+                                                  child: ElevatedButton(
+                                                      style: const ButtonStyle(
+                                                          backgroundColor:
+                                                              MaterialStatePropertyAll(
+                                                                  Colors
+                                                                      .redAccent)),
+                                                      onPressed: () {
+                                                        cancelReport();
+                                                      },
+                                                      child:
+                                                          const Text("CANCEL")),
+                                                ),
+                                              ],
+                                            )
+                                          : const SizedBox(),
+                                  reportDetails!.status == "Pending"
+                                      ? Padding(
+                                          padding: EdgeInsets.only(top: 2.h),
+                                          child: SizedBox(
                                             height: 6.h,
                                             width: 100.w,
                                             child: ElevatedButton(
+                                                style: const ButtonStyle(
+                                                    backgroundColor:
+                                                        MaterialStatePropertyAll(
+                                                            Colors.redAccent)),
                                                 onPressed: () {
                                                   updateReport(
-                                                      status: "Accepted");
+                                                      status: "Rejected");
                                                 },
-                                                child: const Text("ACCEPT")),
-                                          )
-                                        : widget.reportDetails.status ==
-                                                "Accepted"
-                                            ? SizedBox(
-                                                height: 6.h,
-                                                width: 100.w,
-                                                child: ElevatedButton(
-                                                    onPressed: () {
-                                                      updateReport(
-                                                          status: "Done");
-                                                    },
-                                                    child: const Text("DONE")),
-                                              )
-                                            : const SizedBox(),
-                                    widget.reportDetails.status == "Pending"
-                                        ? Padding(
-                                            padding: EdgeInsets.only(top: 2.h),
-                                            child: SizedBox(
-                                              height: 6.h,
-                                              width: 100.w,
-                                              child: ElevatedButton(
-                                                  style: const ButtonStyle(
-                                                      backgroundColor:
-                                                          MaterialStatePropertyAll(
-                                                              Colors
-                                                                  .redAccent)),
-                                                  onPressed: () {
-                                                    updateReport(
-                                                        status: "Rejected");
-                                                  },
-                                                  child: const Text("REJECT")),
-                                            ),
-                                          )
-                                        : const SizedBox.shrink()
+                                                child: const Text("REJECT")),
+                                          ),
+                                        )
+                                      : const SizedBox.shrink()
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                      : Container(
+                          height: 9.h,
+                          width: 100.w,
+                          decoration: BoxDecoration(
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.2),
+                                  spreadRadius: 4,
+                                  blurRadius: 5,
+                                  offset: const Offset(
+                                      0, 0), // changes x,y position of shadow
+                                ),
+                              ],
+                              color: Colors.white,
+                              borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(20),
+                                  topRight: Radius.circular(20))),
+                          child: Center(
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  isShowContainer =
+                                      isShowContainer ? false : true;
+                                });
+                              },
+                              child: CircleAvatar(
+                                radius: 5.w,
+                                backgroundColor: Colors.black,
+                                child: const Icon(
+                                  Icons.arrow_upward_rounded,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                  Positioned(
+                      top: 5.h,
+                      left: 5.w,
+                      child: SizedBox(
+                        width: 90.w,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                getBack();
+                              },
+                              child: Container(
+                                height: 7.h,
+                                width: 12.w,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.2),
+                                      spreadRadius: 4,
+                                      blurRadius: 5,
+                                      offset: const Offset(0,
+                                          0), // changes x,y position of shadow
+                                    ),
                                   ],
                                 ),
-                              ),
-                            ),
-                          )
-                        : Container(
-                            height: 9.h,
-                            width: 100.w,
-                            decoration: BoxDecoration(
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.2),
-                                    spreadRadius: 4,
-                                    blurRadius: 5,
-                                    offset: const Offset(
-                                        0, 0), // changes x,y position of shadow
-                                  ),
-                                ],
-                                color: Colors.white,
-                                borderRadius: const BorderRadius.only(
-                                    topLeft: Radius.circular(20),
-                                    topRight: Radius.circular(20))),
-                            child: Center(
-                              child: GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    isShowContainer =
-                                        isShowContainer ? false : true;
-                                  });
-                                },
-                                child: CircleAvatar(
-                                  radius: 5.w,
-                                  backgroundColor: Colors.black,
-                                  child: const Icon(
-                                    Icons.arrow_upward_rounded,
-                                    color: Colors.white,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.arrow_back_ios_new_rounded,
+                                    size: 14.sp,
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                    Positioned(
-                        top: 5.h,
-                        left: 5.w,
-                        child: SizedBox(
-                          width: 90.w,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.pop(context);
-                                },
-                                child: Container(
-                                  height: 7.h,
-                                  width: 12.w,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.2),
-                                        spreadRadius: 4,
-                                        blurRadius: 5,
-                                        offset: const Offset(0,
-                                            0), // changes x,y position of shadow
+                            responderDetails != null
+                                ? Row(
+                                    children: [
+                                      GestureDetector(
+                                        onTap: () {
+                                          callReporter();
+                                        },
+                                        child: Container(
+                                          height: 7.h,
+                                          width: 12.w,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withOpacity(0.2),
+                                                spreadRadius: 4,
+                                                blurRadius: 5,
+                                                offset: const Offset(0,
+                                                    0), // changes x,y position of shadow
+                                              ),
+                                            ],
+                                          ),
+                                          child: Center(
+                                            child: Icon(
+                                              Icons.call,
+                                              size: 14.sp,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 3.w,
+                                      ),
+                                      GestureDetector(
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                              MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      ChatPage(
+                                                        reportID:
+                                                            reportDetails!.id,
+                                                      )));
+                                        },
+                                        child: Container(
+                                          height: 7.h,
+                                          width: 12.w,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withOpacity(0.2),
+                                                spreadRadius: 4,
+                                                blurRadius: 5,
+                                                offset: const Offset(0,
+                                                    0), // changes x,y position of shadow
+                                              ),
+                                            ],
+                                          ),
+                                          child: Center(
+                                            child: Icon(
+                                              Icons.message,
+                                              size: 14.sp,
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ],
-                                  ),
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.arrow_back_ios_new_rounded,
-                                      size: 14.sp,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              responderDetails != null
-                                  ? Row(
-                                      children: [
-                                        GestureDetector(
-                                          onTap: () {
-                                            callReporter();
-                                          },
-                                          child: Container(
-                                            height: 7.h,
-                                            width: 12.w,
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              shape: BoxShape.circle,
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withOpacity(0.2),
-                                                  spreadRadius: 4,
-                                                  blurRadius: 5,
-                                                  offset: const Offset(0,
-                                                      0), // changes x,y position of shadow
-                                                ),
-                                              ],
-                                            ),
-                                            child: Center(
-                                              child: Icon(
-                                                Icons.call,
-                                                size: 14.sp,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 3.w,
-                                        ),
-                                        GestureDetector(
-                                          onTap: () {
-                                            Navigator.of(context).push(
-                                                MaterialPageRoute(
-                                                    builder: (context) =>
-                                                        ChatPage(
-                                                          reportID: widget
-                                                              .reportDetails.id,
-                                                        )));
-                                          },
-                                          child: Container(
-                                            height: 7.h,
-                                            width: 12.w,
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              shape: BoxShape.circle,
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withOpacity(0.2),
-                                                  spreadRadius: 4,
-                                                  blurRadius: 5,
-                                                  offset: const Offset(0,
-                                                      0), // changes x,y position of shadow
-                                                ),
-                                              ],
-                                            ),
-                                            child: Center(
-                                              child: Icon(
-                                                Icons.message,
-                                                size: 14.sp,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  : const SizedBox()
-                            ],
-                          ),
-                        ))
-                  ],
-                ),
-              ));
+                                  )
+                                : const SizedBox()
+                          ],
+                        ),
+                      ))
+                ],
+              ),
+            ),
+    ));
   }
 }

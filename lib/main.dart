@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:responder/screens/auth/login_screen.dart';
 import 'package:responder/screens/home_screen.dart';
+import 'package:responder/screens/report_details_page.dart';
 import 'package:responder/terms_and_conditions.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
@@ -72,8 +73,10 @@ class _MyAppState extends State<MyApp> {
   FirebaseMessaging messaging = FirebaseMessaging.instance;
   String? token;
   bool? termsAndConditionStatus;
+  bool? hasReportToComplete;
 
   bool isLoading = true;
+  String? reportID;
 
   @override
   void initState() {
@@ -84,8 +87,21 @@ class _MyAppState extends State<MyApp> {
   Future<bool> checkTermsConditionIfAccepted() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     bool? status = prefs.getBool('TermsAndConditionStatus');
+
     if (status != null) {
       return status;
+    } else {
+      return false;
+    }
+  }
+
+  Future<bool> checkIfHasPendingReport() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? reportid = prefs.getString('reportID');
+
+    if (reportid != null) {
+      reportID = reportid;
+      return true;
     } else {
       return false;
     }
@@ -160,6 +176,7 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> checkNotificationPermission() async {
     termsAndConditionStatus = await checkTermsConditionIfAccepted();
+    hasReportToComplete = await checkIfHasPendingReport();
     var res = await messaging.requestPermission();
     if (res.authorizationStatus == AuthorizationStatus.authorized) {
       await notificationSetup();
@@ -192,7 +209,12 @@ class _MyAppState extends State<MyApp> {
                 ? const TermsAndConditionsPage()
                 : FirebaseAuth.instance.currentUser == null
                     ? LoginScreen()
-                    : const HomeScreen(),
+                    : hasReportToComplete == true
+                        ? ReportDetails(
+                            reportID: reportID!,
+                            from: "Root",
+                          )
+                        : const HomeScreen(),
       );
     });
   }
