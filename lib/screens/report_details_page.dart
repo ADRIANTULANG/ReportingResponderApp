@@ -68,6 +68,8 @@ class _ReportDetailsState extends State<ReportDetails> {
           lat: mapreportDetails['lat'],
           remarks: mapreportDetails['remarks'] ?? "",
           status: mapreportDetails['status'],
+          responderRemarks: mapreportDetails['responderRemarks'],
+          level: mapreportDetails['level'],
           id: widget.reportID);
 
       await initializedData();
@@ -168,6 +170,10 @@ class _ReportDetailsState extends State<ReportDetails> {
             "Content-Type": "application/json"
           },
           body: body);
+
+      senfEmailNotif(
+          email: reporterDetails!.email,
+          message: jsonDecode(body)['notification']['body']);
     } catch (_) {}
   }
 
@@ -273,6 +279,134 @@ class _ReportDetailsState extends State<ReportDetails> {
         //     ModalRoute.withName('/'));
       }
     } catch (_) {}
+  }
+
+  updateResponderRemarks(
+      {required String remarks, required String level}) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('Reports')
+          .doc(reportDetails!.id)
+          .update({
+        "responderRemarks": remarks,
+        "level": level,
+      });
+      setState(() {
+        reportDetails!.responderRemarks = remarks;
+        reportDetails!.level = level;
+      });
+    } catch (_) {}
+  }
+
+  showDialogAddRemarks() {
+    remarks.clear();
+    bool major = true;
+    bool minor = false;
+    String level = "Major";
+
+    showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return StatefulBuilder(builder: (context, setState) {
+            return AlertDialog(
+              title: Text(
+                "Remarks",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15.sp),
+              ),
+              content: SizedBox(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        height: 15.h,
+                        width: 100.w,
+                        decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all()),
+                        child: TextField(
+                          maxLines: 5,
+                          controller: remarks,
+                          decoration: InputDecoration(
+                              contentPadding:
+                                  EdgeInsets.only(top: .5.h, left: 2.w),
+                              border: InputBorder.none),
+                        ),
+                      ),
+                      SizedBox(
+                        height: 2.h,
+                      ),
+                      Row(
+                        children: [
+                          Checkbox(
+                              value: major,
+                              onChanged: (value) {
+                                setState(() {
+                                  minor = false;
+                                  major = true;
+                                  level = "Major";
+                                });
+                              }),
+                          const Text("Major")
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Checkbox(
+                              value: minor,
+                              onChanged: (value) {
+                                setState(() {
+                                  minor = true;
+                                  major = false;
+                                  level = "Minor";
+                                });
+                              }),
+                          const Text("Minor")
+                        ],
+                      ),
+                      SizedBox(
+                        height: 6.h,
+                        width: 100.w,
+                        child: ElevatedButton(
+                            onPressed: () {
+                              if (remarks.text.isNotEmpty) {
+                                Navigator.pop(context);
+                                updateResponderRemarks(
+                                    remarks: remarks.text, level: level);
+                              }
+                            },
+                            child: const Text("ADD")),
+                      )
+                    ],
+                  ),
+                ),
+              ),
+            );
+          });
+        });
+  }
+
+  senfEmailNotif({
+    required String email,
+    required String message,
+  }) async {
+    var response = await http.post(
+        Uri.parse('https://api.emailjs.com/api/v1.0/email/send'),
+        headers: {
+          'origin': 'http://localhost',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'service_id': 'service_lrb1u5l',
+          'template_id': 'template_13mp4el',
+          'user_id': 'QHapO9GkU6VTFkw8t',
+          'template_params': {
+            'user_subject': 'Report Notif',
+            'email': email,
+            'message': message
+          }
+        }));
+    print(response.statusCode);
   }
 
   @override
@@ -432,25 +566,32 @@ class _ReportDetailsState extends State<ReportDetails> {
                                         fontSize: 12.sp,
                                         overflow: TextOverflow.ellipsis),
                                   ),
-                                  SizedBox(
-                                    height: 2.h,
-                                  ),
-                                  Container(
-                                    height: 15.h,
-                                    width: 100.w,
-                                    decoration: BoxDecoration(
-                                        image: reportDetails!.imageUrl == ""
-                                            ? null
-                                            : DecorationImage(
-                                                fit: BoxFit.cover,
-                                                image: NetworkImage(
-                                                    reportDetails!.imageUrl))),
-                                  ),
-                                  SizedBox(
-                                    height: 2.h,
-                                  ),
+                                  reportDetails!.imageUrl == ""
+                                      ? const SizedBox.shrink()
+                                      : Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            SizedBox(
+                                              height: 2.h,
+                                            ),
+                                            Container(
+                                              height: 15.h,
+                                              width: 100.w,
+                                              decoration: BoxDecoration(
+                                                  image: DecorationImage(
+                                                      fit: BoxFit.cover,
+                                                      image: NetworkImage(
+                                                          reportDetails!
+                                                              .imageUrl))),
+                                            ),
+                                            SizedBox(
+                                              height: 2.h,
+                                            ),
+                                          ],
+                                        ),
                                   reportDetails!.remarks == ""
-                                      ? const SizedBox()
+                                      ? const SizedBox.shrink()
                                       : Column(
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
@@ -541,7 +682,85 @@ class _ReportDetailsState extends State<ReportDetails> {
                                                 child: const Text("REJECT")),
                                           ),
                                         )
-                                      : const SizedBox.shrink()
+                                      : const SizedBox.shrink(),
+                                  reportDetails!.status == "Done" &&
+                                          reportDetails!.responderRemarks ==
+                                              null
+                                      ? Padding(
+                                          padding: EdgeInsets.only(top: 2.h),
+                                          child: SizedBox(
+                                            height: 6.h,
+                                            width: 100.w,
+                                            child: ElevatedButton(
+                                                onPressed: () {
+                                                  showDialogAddRemarks();
+                                                },
+                                                child:
+                                                    const Text("ADD REMARKS")),
+                                          ),
+                                        )
+                                      : reportDetails!.status == "Done" &&
+                                              reportDetails!.responderRemarks !=
+                                                  null
+                                          ? Padding(
+                                              padding:
+                                                  EdgeInsets.only(top: 2.h),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .spaceBetween,
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        "Responder Remarks",
+                                                        style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 13.sp,
+                                                        ),
+                                                      ),
+                                                      GestureDetector(
+                                                          onTap: () {
+                                                            showDialogAddRemarks();
+                                                          },
+                                                          child: const Icon(
+                                                              Icons.edit))
+                                                    ],
+                                                  ),
+                                                  Text(
+                                                    reportDetails!
+                                                        .responderRemarks!,
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.normal,
+                                                      fontSize: 12.sp,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    "Level",
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 13.sp,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    reportDetails!.level!,
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.normal,
+                                                      fontSize: 12.sp,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ))
+                                          : const SizedBox.shrink(),
                                 ],
                               ),
                             ),
