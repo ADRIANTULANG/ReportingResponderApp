@@ -26,14 +26,15 @@ class NewHazardTab extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            cardWidget('assets/images/image 2.png', 'Hurricane'),
+            // cardWidget('assets/images/image 2.png', 'Hurricane'),
             cardWidget('assets/images/flood.png', 'Flood'),
+            cardWidget('assets/images/earthquake.png', 'Earthquake'),
           ],
         ),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            cardWidget('assets/images/earthquake.png', 'Earthquake'),
+            // cardWidget('assets/images/earthquake.png', 'Earthquake'),
             cardWidget('assets/images/landslide.png', 'Landslide'),
           ],
         ),
@@ -46,7 +47,7 @@ class NewHazardTab extends StatelessWidget {
       width: 150,
       height: 175,
       decoration: BoxDecoration(
-        color: Color.fromARGB(255, 251, 252, 252),
+        color: const Color.fromARGB(255, 251, 252, 252),
         border: Border.all(
           color: Colors.black,
         ),
